@@ -64,8 +64,8 @@ def cut_pic(pic, labels, picname, path_d):
         num_d[type] += 1
         pic_part.save(path_d[type] + "\\" + type + "_" + picname + "_" + str(num_d[type]) + ".png", "PNG")
 
-def cut_background(path_d, num_per_pic, size):
-    i = 0
+def cut_background(path_d, num_per_pic, size, num_to_create=0):
+    num_pic = 0
     start_time = time.time()
     files = os.listdir(path_d['train_pics'])
     for file in files:
@@ -93,34 +93,43 @@ def cut_background(path_d, num_per_pic, size):
                 ymax = ymin + bg_size
                 bbox_bg = (xmin,ymin,xmax,ymax)
                 if 255 in label_map[ymin:ymax, xmin:xmax]:
-                    print("Background contains objects, skip.")
+                    sys.stdout.write(".")
                     next
                 else:
                     bg_pic = pic.crop(bbox_bg)
                     bg_pic = bg_pic.resize((size, size), resample=5)
                     n_bg += 1
-                    print("Background #"+ str(n_bg) +" found in picture "+ file[0:-4] +": " + str(bbox_bg))
+                    sys.stdout.write("\rBackground #"+ str(n_bg) +" found in picture " + file[0:-4] +
+                                     "  ( " + str(num_pic*num_per_pic+n_bg) + " / " + str(num_to_create) + " )") # +": " + str(bbox_bg))
                     bg_pic.save(path_d['Background'] + "\\Background_" + file[0:-4] + "_" + str(n_bg) + ".png", "PNG")
+
+                    if num_pic*num_per_pic+n_bg>=num_to_create:
+                        pic.close
+                        print("\nRuntime: " + str(int(time.time() - start_time)) + " sec.")
+                        return
             pic.close
 
-        i += 1
-        # Partial processing for testing:
-        #if (i > 2):
-        #    break
+        num_pic += 1
 
-    print("Runtime: " + str(int(time.time()-start_time)) + " sec.")
+    print("\nRuntime: " + str(int(time.time()-start_time)) + " sec.")
 
 
 #create uniform pictures for training database
-def pre_process(path, size):
+def pre_process(path, size, num_to_create=0):
     files = os.listdir(path)
     num = 0
-    num_files = len(files)
+    if num_to_create == 0:
+        num_total = len(files)
+    else:
+        num_total = num_to_create
+
     for i,file in enumerate(files):
-        sys.stdout.write("\rPreprocessing pictures: " + str(i) + " / " + str(num_files)) #debug
+        sys.stdout.write("\rPreprocessing pictures: " + str(i) + " / " + str(num_total)) #debug
         type = file.split('_')[0]
         if file[-3:] == "png":
             pic = Image.open(path + "\\" + file)
+            if pic.size[0]<(size/4) or pic.size[1]<(size/4):
+                continue    # skip extremely small pictures
             #CALCULATE SIZE
             if pic.size[0] > pic.size[1]:
                 # picture is broad
@@ -140,6 +149,9 @@ def pre_process(path, size):
             if height == width:
                 pic_small.save(path + "//processed//" + type + "_part_" + str(num) + ".png", "PNG")
                 num += 1
+                if num_to_create != 0 and num >= num_to_create:
+                    break
+
             elif height < width:
                 num_parts = math.ceil(width/size)
                 deltaw = math.floor((width - size) / (num_parts - 1))
@@ -148,6 +160,9 @@ def pre_process(path, size):
                     pic_part = pic_small.crop(bbox)
                     pic_part.save(path + "//processed//" + type + "_part_" + str(num) + ".png", "PNG")
                     num += 1
+                    if num_to_create!=0 and num >= num_to_create:
+                        break
+
             else:
                 num_parts = math.ceil(height / size)
                 deltah = math.floor((height - size) / (num_parts - 1))
@@ -156,19 +171,23 @@ def pre_process(path, size):
                     pic_part = pic_small.crop(bbox)
                     pic_part.save(path + "//processed//" + type + "_part_" + str(num) + ".png", "PNG")
                     num += 1
+                    if num_to_create!=0 and num >= num_to_create:
+                        break
+
+        if num_to_create!=0 and num >= num_to_create:
+            break
     print("\n")
 
 
-        #if num>100:
-        #    break
+
 
 
 #MAIN------------------------------------------------------------------------
 #cut_pics(path_d)
-#cut_background(path_d, num_per_pic=2, size=64)
-#pre_process(path_d['Car'], 64)
-#pre_process(path_d['Pedestrian'], 64)
+#cut_background(path_d, num_per_pic=8, size=64, num_to_create=60000)
+pre_process(path_d['Car'], 64)
+pre_process(path_d['Pedestrian'], 64)
 #pre_process(path_d['Cyclist'], 64)
 #pre_process(path_d['Person_sitting'], 64)
 #pre_process(path_d['Truck'], 64)
-#pre_process(path_d['Van'], 64)
+pre_process(path_d['Van'], 64)

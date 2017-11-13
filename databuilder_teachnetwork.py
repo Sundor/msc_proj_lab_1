@@ -41,7 +41,7 @@ path_d = {
 log_cols = {
     'model_name':   1,
     'start':        2,
-    'end':          3,
+    'time_elapsed':     3,
 
     'labels':       4,
     'num_data':     5,
@@ -121,7 +121,7 @@ def create_databases(path_d, labels, train_split, valid_split):
 
     print("Runtime: " + str(int(time.time() - start_time)) + " sec.")
 
-    return split_databases(main_db, train_split, valid_split)
+    return train_db, valid_db
 
 
 def load_databases(path):
@@ -135,12 +135,7 @@ def load_databases(path):
     valid_db = pickle.load(loadf)
     loadf.close()
 
-    curr_path = path + "\\test.txt"
-    loadf = open(curr_path, "rb")
-    test_db = pickle.load(loadf)
-    loadf.close()
-
-    return train_db, valid_db, test_db
+    return train_db, valid_db
 
 
 def split_databases(main_db, train_split, valid_split):
@@ -196,7 +191,7 @@ def create_model():
     model.add(Activation('sigmoid'))
 
     model.compile(loss='binary_crossentropy',
-              optimizer='rmsprop',
+              optimizer='adam',
               metrics=['accuracy'])
 
     return model
@@ -257,10 +252,9 @@ def train_model(model, train_xy, valid_xy, epochs, batch_size, earlystopping):
     return model, history
 
 
-def log_results(paths, model, history):
-    end_time = datetime.datetime.now()
-    time_elapsed = start_time - end_time
-    # num_epochs = history.history['epoch'][-1]
+def log_results(paths, model, history, epochs):
+    time_elapsed = (end_time - start_time).total_seconds()
+    num_epochs = epochs
 
     labels_str = ""
     for label in used_labels:
@@ -313,12 +307,21 @@ def log_results(paths, model, history):
     # open log file
     wb = load_workbook(paths['Log'])
     sheet = wb.worksheets[0]
+
+    # Read prevoius results, if training was continued
+    if cfg_create_model == False:
+        for row in sheet.rows:
+            if row[log_cols['model_name'] - 1].value == model_load_path:
+                time_elapsed += row[log_cols['time_elapsed'] - 1].value
+                num_epochs += row[log_cols['epochs'] - 1].value
+                break
+
     new_row = sheet.max_row + 1
 
     # identify model
-    sheet.cell(row=new_row, column=log_cols['model_name']).value = "model_" + start_time_str
+    sheet.cell(row=new_row, column=log_cols['model_name']).value = model_save_path
     sheet.cell(row=new_row, column=log_cols['start']).value = start_time.strftime("%Y. %m. %d. %H:%M:%S")
-    sheet.cell(row=new_row, column=log_cols['end']).value = end_time.strftime("%Y. %m. %d. %H:%M:%S")
+    sheet.cell(row=new_row, column=log_cols['time_elapsed']).value = time_elapsed
     # parameters
     sheet.cell(row=new_row, column=log_cols['labels']).value = labels_str
     sheet.cell(row=new_row, column=log_cols['num_data']).value = num_data
@@ -329,7 +332,7 @@ def log_results(paths, model, history):
     sheet.cell(row=new_row, column=log_cols['net_shape']).alignment = Alignment(wrap_text=True)
 
     # results
-    # sheet.write(new_row, log_cols['epochs'],        "model_" + start_time_str)
+    sheet.cell(row=new_row, column=log_cols['epochs']).value = num_epochs
     sheet.cell(row=new_row, column=log_cols['loss']).value = history.history['loss'][-1]
     sheet.cell(row=new_row, column=log_cols['acc']).value = history.history['acc'][-1]
     sheet.cell(row=new_row, column=log_cols['val_loss']).value = history.history['val_loss'][-1]
@@ -342,6 +345,7 @@ def log_results(paths, model, history):
     # close wb
     wb.save(paths['Log'])
     wb.close()
+    print("Model logged.")
 
 
 # save time and date of start
@@ -352,21 +356,19 @@ start_time = datetime.datetime.now()
 # CONFIGURED PARAMETERS
 
 cfg_create_db = False # if true, gather pictures from data_object folders, and pickle a new database
-cfg_create_model = True # if false, load a previous model and train that
+cfg_create_model = False # if false, load a previous model and train that
 
-load_path = path_d['MainDatabase'] + "\\maindata_20171105_002115_6"
-model_save_path = path_d['Model'] + "\\model_" + start_time_str + ".hdf5"
-weights_save_path = path_d['Model'] + "\\weights_" + start_time_str + ".hdf5"
-model_load_path = path_d['Model'] + "\\model_20171028_224634.hdf5"
-weights_load_path = path_d['Model'] + "\\weights_20171028_224634.hdf5"
+load_path = path_d['MainDatabase'] + "\\maindata_20171110_222401_6"
+model_load_path = path_d['Model'] + "\\model_20171111_005939.hdf5"
+#weights_load_path = path_d['Model'] + "\\weights_20171028_224634.hdf5"
 used_labels = ['Car', 'Background', 'Pedestrian', 'Van', 'Truck', 'Cyclist']
 
 picture_shape = (64, 64)
 picture_array_shape = (64, 64, 3)
 
-cfg_train_split = 0.65
+cfg_train_split = 0.7
 cfg_valid_split = 0.15
-cfg_epochs = 50
+cfg_epochs = 20
 cfg_batch_size = 32
 cfg_earlystopping = 30
 
@@ -374,27 +376,31 @@ cfg_earlystopping = 30
 # CALCULATED PARAMETERS
 
 num_labels = len(used_labels)
+model_save_path = path_d['Model'] + "\\model_" + start_time_str + ".hdf5"
+weights_save_path = path_d['Model'] + "\\weights_" + start_time_str + ".hdf5"
 
 ################
 # GET DATABASE
 
 if (cfg_create_db):
-    train_xy, valid_xy, test_xy = create_databases(path_d, used_labels, cfg_train_split, cfg_valid_split)
+    train_xy, valid_xy = create_databases(path_d, used_labels, cfg_train_split, cfg_valid_split)
 else:
-    train_xy, valid_xy, test_xy = load_databases(load_path)
+    train_xy, valid_xy = load_databases(load_path)
 
-num_data = train_xy.shape(1) + valid_xy.shape(1) + test_xy.shape(1)
+num_data = len(train_xy[0]) + len(valid_xy[0])
 ########################
 # CREATE MODEL
+if cfg_epochs > 0:
+    if (cfg_create_model):
+        model = create_model()
+        model, history = train_model(model, train_xy, valid_xy, cfg_epochs, cfg_batch_size, cfg_earlystopping)
 
-if (cfg_create_model):
-    model = create_model()
-    model, history = train_model(model, train_xy, valid_xy, cfg_epochs, cfg_batch_size, cfg_earlystopping)
+    else:
+        model = load_model(model_load_path)
+        model, history = train_model(model, train_xy, valid_xy, cfg_epochs, cfg_batch_size, cfg_earlystopping)
 
-else:
-    model = load_model(model_load_path)
-    model, history = train_model(model, train_xy, valid_xy, cfg_epochs, cfg_batch_size, cfg_earlystopping)
+    end_time = datetime.datetime.now()
 
-log_results(path_d, model, history)
+    log_results(path_d, model, history, cfg_epochs)
 
 
